@@ -20,7 +20,11 @@ public class SocketClient {
     private Thread socketClientThread;
     private SocketClientListener socketClientListener;
 
-    public SocketClient(SocketClientListener socketClientListener) {
+    public SocketClient(String host, SocketClientListener socketClientListener) {
+
+        if (host != null) {
+            this.serverHost = host;
+        }
 
         this.socketClientListener = socketClientListener;
         socketClientRunnable = new SocketClientRunnable();
@@ -76,6 +80,9 @@ public class SocketClient {
                 if (ex.getMessage().contains("Cannot run program")) {
                     socketClientListener.onFailed(new NoADBException(ex.getMessage()));
                 } else {
+                    if (ex != null && ex.getMessage().contains("Socket closed")) {
+                        return;
+                    }
                     socketClientListener.onFailed(ex);
                 }
             } finally {
@@ -97,6 +104,27 @@ public class SocketClient {
                 }
             }).start();
 
+        }
+
+        public void stop() {
+            try {
+                if (socket != null) {
+                    socket.close();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    public void stop() {
+
+        if (socketClientRunnable != null) {
+            socketClientRunnable.stop();
+        }
+
+        if (socketClientThread != null) {
+            socketClientThread.interrupt();
         }
     }
 

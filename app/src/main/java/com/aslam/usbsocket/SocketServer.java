@@ -6,6 +6,8 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.ArrayList;
+import java.util.List;
 
 public class SocketServer {
 
@@ -20,19 +22,17 @@ public class SocketServer {
         void onDataReceived(String data);
     }
 
-    public static final String TAG = "ECR_SOCKET";
     public static final int PORT = 46568;
 
     private Thread socketThread;
-    private Thread communicationThread;
+    // private Thread communicationThread;
     private SocketServerRunnable socketServerRunnable;
-    private CommunicationThreadRunnable communicationThreadRunnable;
+    // private CommunicationThreadRunnable communicationThreadRunnable;
     private ServerSocket serverSocket;
     private Socket socket;
     private SocketServerListener socketClientListener;
-
-    private DataInputStream in;
-    private DataOutputStream out;
+    private List<CommunicationThreadRunnable> communicationRunnableList = new ArrayList<>();
+    private List<Thread> communicationThreadList = new ArrayList<>();
 
     public SocketServer(SocketServerListener socketClientListener) {
         this.socketClientListener = socketClientListener;
@@ -44,8 +44,11 @@ public class SocketServer {
         if (socketThread != null && socketThread.isAlive()) {
             socketThread.interrupt();
         }
-        if (communicationThread != null && communicationThread.isAlive()) {
-            communicationThread.interrupt();
+
+        for (Thread communicationThread : communicationThreadList) {
+            if (communicationThread != null && communicationThread.isAlive()) {
+                communicationThread.interrupt();
+            }
         }
 
         socketThread = new Thread(socketServerRunnable);
@@ -54,15 +57,19 @@ public class SocketServer {
 
     public void stop() {
 
-        if (communicationThreadRunnable != null) {
-            communicationThreadRunnable.stop();
+        for (CommunicationThreadRunnable communicationThreadRunnable : communicationRunnableList) {
+            if (communicationThreadRunnable != null) {
+                communicationThreadRunnable.stop();
+            }
         }
 
         socketServerRunnable.stop();
         socketThread.interrupt();
 
-        if (communicationThread != null) {
-            communicationThread.interrupt();
+        for (Thread communicationThread : communicationThreadList) {
+            if (communicationThread != null) {
+                communicationThread.interrupt();
+            }
         }
     }
 
@@ -85,32 +92,89 @@ public class SocketServer {
 
                     socketClientListener.onConnected(String.format("Client connected from: %s", socket.getRemoteSocketAddress().toString()));
 
-                    in = new DataInputStream(socket.getInputStream());
+                    DataInputStream in = new DataInputStream(socket.getInputStream());
                     socketClientListener.onDataReceived(in.readUTF());
 
-                    out = new DataOutputStream(socket.getOutputStream());
+                    DataOutputStream out = new DataOutputStream(socket.getOutputStream());
                     out.writeUTF("Thank you for connecting to " + socket.getLocalSocketAddress());
 
-                    if (communicationThread != null && communicationThread.isAlive()) {
-                        communicationThread.interrupt();
+                    for (Thread communicationThread : communicationThreadList) {
+                        if (communicationThread != null && communicationThread.isAlive()) {
+                            communicationThread.interrupt();
+                        }
                     }
 
-                    communicationThreadRunnable = new CommunicationThreadRunnable(socket);
-                    communicationThread = new Thread(communicationThreadRunnable);
+                    CommunicationThreadRunnable communicationThreadRunnable = new CommunicationThreadRunnable(socket, in, out);
+                    Thread communicationThread = new Thread(communicationThreadRunnable);
                     communicationThread.start();
+
+                    communicationRunnableList.add(communicationThreadRunnable);
+                    communicationThreadList.add(communicationThread);
                 }
 
             } catch (IOException e) {
-
                 if (e != null && e.getMessage().contains("Socket closed")) {
                     return;
                 }
-
                 socketClientListener.onFailed(e);
             } finally {
                 socketThread.interrupt();
             }
 
+        }
+
+        public void sendData(final String data) {
+
+            for (CommunicationThreadRunnable communicationThreadRunnable : communicationRunnableList) {
+                communicationThreadRunnable.sendData(data);
+            }
+        }
+
+        public void stop() {
+            try {
+                serverSocket.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    class CommunicationThreadRunnable implements Runnable {
+
+        private Socket clientSocket;
+        private DataInputStream in;
+        private DataOutputStream out;
+
+        public CommunicationThreadRunnable(Socket clientSocket, DataInputStream in, DataOutputStream out) {
+            this.clientSocket = clientSocket;
+            this.in = in;
+            this.out = out;
+        }
+
+        @Override
+        public void run() {
+            try {
+                while (true) {
+                    in = new DataInputStream(this.clientSocket.getInputStream());
+                    socketClientListener.onDataReceived(in.readUTF());
+                }
+            } catch (EOFException e) {
+                socketClientListener.onDisconnected(e);
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally {
+                for (Thread communicationThread : communicationThreadList) {
+                    communicationThread.interrupt();
+                }
+            }
+        }
+
+        public void stop() {
+            try {
+                clientSocket.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
 
         public void sendData(final String data) {
@@ -126,47 +190,6 @@ public class SocketServer {
                 }
             }).start();
 
-        }
-
-        public void stop() {
-            try {
-                serverSocket.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-    }
-
-    class CommunicationThreadRunnable implements Runnable {
-
-        private Socket clientSocket;
-
-        public CommunicationThreadRunnable(Socket clientSocket) {
-            this.clientSocket = clientSocket;
-        }
-
-        @Override
-        public void run() {
-            try {
-                while (true) {
-                    in = new DataInputStream(this.clientSocket.getInputStream());
-                    socketClientListener.onDataReceived(in.readUTF());
-                }
-            } catch (EOFException e) {
-                socketClientListener.onDisconnected(e);
-            } catch (IOException e) {
-                e.printStackTrace();
-            } finally {
-                communicationThread.interrupt();
-            }
-        }
-
-        public void stop() {
-            try {
-                clientSocket.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
         }
     }
 }

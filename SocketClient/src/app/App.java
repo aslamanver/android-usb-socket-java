@@ -38,7 +38,7 @@ public class App {
         frame.getContentPane().add(BorderLayout.CENTER, panel);
         frame.setVisible(true);
 
-        SocketClient socketClient = new SocketClient(new SocketClient.SocketClientListener() {
+        SocketClient socketClient = new SocketClient(null, new SocketClient.SocketClientListener() {
 
             @Override
             public void onConnected(String message) {
